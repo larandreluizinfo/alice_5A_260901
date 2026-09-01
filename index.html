@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maquiagem da Escola 💄✨</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="game">
+    <header class="header">
+      <h1>💄 Maquiagem da Escola ✨</h1>
+      <p class="subtitle">Maquie as meninas, escolha a roupa e arrume o cabelo para ir à escola!</p>
+      <div class="progress">
+        <span id="progressText">0/15</span> meninas prontas
+        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="girl-zones">
+        <a href="#alice" class="zone-card alice-card">
+          <div class="zone-photo-alice"></div>
+          <span>Alice</span>
+        </a>
+        <a href="#livia" class="zone-card livia-card">
+          <div class="zone-photo-livia"></div>
+          <span>Lívia</span>
+        </a>
+      </div>
+
+      <section id="alice" class="girl-section">
+        <h2>💇 Arrumar o Cabelo — Alice</h2>
+        <div class="hair-layout">
+          <div class="mannequin">
+            <canvas id="aliceCanv" width="260" height="340"></canvas>
+            <div class="mannequin-name">Alice</div>
+          </div>
+          <div class="hair-tools">
+            <h3>Estilos de Cabelo</h3>
+            <div id="aliceHair" class="option-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="livia" class="girl-section">
+        <h2>💇 Arrumar o Cabelo — Lívia</h2>
+        <div class="hair-layout">
+          <div class="mannequin">
+            <canvas id="liviaCanv" width="260" height="340"></canvas>
+            <div class="mannequin-name">Lívia</div>
+          </div>
+          <div class="hair-tools">
+            <h3>Estilos de Cabelo</h3>
+            <div id="liviaHair" class="option-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="girl-section">
+        <h2>💄 Maquiagem & 👗 Roupas para a Escola</h2>
+        <div class="tools">
+          <div class="tool-group">
+            <h3>Base</h3>
+            <div id="baseTools" class="option-grid"></div>
+          </div>
+          <div class="tool-group">
+            <h3>Sombras 🎨</h3>
+            <div id="shadowTools" class="option-grid"></div>
+          </div>
+          <div class="tool-group">
+            <h3>Batom 💋</h3>
+            <div id="lipTools" class="option-grid"></div>
+          </div>
+          <div class="tool-group">
+            <h3>Roupa para a Escola 🎒</h3>
+            <div id="outfitTools" class="option-grid"></div>
+          </div>
+        </div>
+
+        <div class="randomize">
+          <button id="randomBtn" class="btn">🎲 Surpreenda-me</button>
+          <button id="resetBtn" class="btn btn-reset">🔄 Limpar</button>
+        </div>
+      </section>
+    </main>
+
+    <div class="grid" id="grid"></div>
+
+    <footer class="footer">
+      <p>Maquie as 15 meninas para levá-las à escola! 🏫</p>
+    </footer>
+  </div>
+
+  <div id="celebrate" class="celebrate hidden"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
