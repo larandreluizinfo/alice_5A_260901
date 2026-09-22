@@ -1,571 +1,385 @@
 (() => {
-  'use strict';
+'use strict';
+// ============ SAVE ============
+const SAVE_KEY = 'stitch_praia_save_v1';
+function loadSave() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (s && typeof s === 'object') return s;
+  } catch (e) {}
+  return { coins: 0, maxLevel: 1, done: [], owned: ['stitch'], selected: 'stitch', boxes: 0 };
+}
+function save(s) { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); }
+let S = loadSave();
+if (!S.owned.includes('stitch')) S.owned.push('stitch');
 
-  // ============ DADOS ============
-  const HAIR_STYLES = {
-    liso:  { label: 'Liso', emoji: '👩' },
-    crespo: { label: 'Crespo', emoji: '🦱' },
-    ondulado: { label: 'Ondulado', emoji: '👩‍🦱' },
-    coque: { label: 'Coque', emoji: '🎀' },
-    trança: { label: 'Trança', emoji: '👱‍♀️' },
-    rabo: { label: 'Rabinho', emoji: '🐰' }
+// ============ PERSONAGENS ============
+const CHARS = [
+  { id: 'stitch',   name: 'Stitch',   emoji: '👽', price: 0 },
+  { id: 'vaca',     name: 'Vaca',     emoji: '🐄', price: 10 },
+  { id: 'macaco',   name: 'Macaco',   emoji: '🐵', price: 10 },
+  { id: 'cachorro', name: 'Cachorro', emoji: '🐶', price: 10 },
+  { id: 'sapo',     name: 'Sapo',     emoji: '🐸', price: 10 },
+  { id: 'pato',     name: 'Pato',     emoji: '🦆', price: 10 },
+];
+function charEmoji() {
+  const c = CHARS.find(c => c.id === S.selected);
+  return c ? c.emoji : '👽';
+}
+
+// ============ CANVAS ============
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const LANES = [W * 0.22, W * 0.5, W * 0.78];
+const GROUND_Y = H - 120;
+
+// estado do jogo
+let running = false, level = 1, progress = 0, progressNeed = 100;
+let player, obstacles, gifts, coinsFly, particles, clouds, speed, spawnT, giftT, timeT, msg, msgT;
+
+function levelConfig(lv) {
+  return {
+    speed: 3.6 + lv * 0.35,          // mais rápido a cada nível
+    spawn: Math.max(55 - lv * 1.4, 22), // intervalo menor = mais obstáculos
+    need: 45 + lv * 4                // quantos pontos para passar
   };
+}
 
-  const BASES = {
-    nenhuma: { label: 'Sem base', emoji: '🚫', tone: null },
-    natural: { label: 'Natural', emoji: '🤎', tone: '#ffe4c4' },
-    porcelana: { label: 'Porcelana', emoji: '🤍', tone: '#fff0e0' },
-    rosa: { label: 'Rosa', emoji: '🌸', tone: '#ffd9e6' },
-    roxa: { label: 'Roxa', emoji: '💜', tone: '#e6d9ff' }
-  };
+function resetLevel(lv) {
+  const cfg = levelConfig(lv);
+  level = lv; progress = 0; progressNeed = cfg.need;
+  speed = cfg.speed; spawnT = 0; giftT = 120; timeT = 0;
+  player = { lane: 1, x: LANES[1], y: GROUND_Y, vy: 0, jumping: false, duck: 0, duckT: 0, alive: true, wobble: 0 };
+  obstacles = []; gifts = []; coinsFly = []; particles = [];
+  clouds = Array.from({ length: 5 }, (_, i) => ({ x: Math.random() * W, y: 20 + Math.random() * 120, s: 0.5 + Math.random() }));
+  msg = ''; msgT = 0;
+}
 
-  const SHADOWS = {
-    nenhuma: { label: 'Nenhuma', emoji: '🚫', tone: null },
-    rosa: { label: 'Rosa', emoji: '🌸', tone: '#ec4899' },
-    roxo: { label: 'Roxo', emoji: '💜', tone: '#8b5cf6' },
-    rosaclaro: { label: 'Rosa claro', emoji: '🩷', tone: '#f9a8d4' },
-    roxoclaro: { label: 'Roxo claro', emoji: '🔮', tone: '#a78bfa' },
-    degradê: { label: 'Degradê', emoji: '🌈', tone: null }
-  };
+// tipos de obstáculo:
+// low = PULAR (crab, rock, castle) | high = ABAIXAR (kite, umbrella) | full = DESVIAR (wave, whale, boat)
+const LOWS = ['🦀', '🪨', '🏰'];
+const HIGHS = ['🪁', '🏖️', '🌴'];
+const FULLS = ['🌊', '🐳', '🚤'];
 
-  const LIPS = {
-    nenhuma: { label: 'Nenhum', emoji: '🚫', tone: null },
-    rosa: { label: 'Rosa', emoji: '💄', tone: '#ec4899' },
-    roxo: { label: 'Roxo', emoji: '💋', tone: '#8b5cf6' },
-    gloss: { label: 'Gloss', emoji: '💧', tone: '#fb7185' },
-    framboesa: { label: 'Framboesa', emoji: '🍓', tone: '#e11d48' }
-  };
+function spawnObstacle() {
+  const r = Math.random();
+  let type, emoji;
+  if (r < 0.35) { type = 'low'; emoji = LOWS[(Math.random() * LOWS.length) | 0]; }
+  else if (r < 0.65) { type = 'high'; emoji = HIGHS[(Math.random() * HIGHS.length) | 0]; }
+  else { type = 'full'; emoji = FULLS[(Math.random() * FULLS.length) | 0]; }
+  // níveis altos: às vezes 2 pistas bloqueadas (tem que desviar!)
+  const lanes = [0, 1, 2];
+  if (type === 'full' && level >= 5 && Math.random() < 0.4) {
+    const free = (Math.random() * 3) | 0;
+    lanes.forEach(L => { if (L !== free) obstacles.push({ lane: L, y: -60, type, emoji, hit: false }); });
+  } else {
+    const lane = (Math.random() * 3) | 0;
+    obstacles.push({ lane, y: -60, type, emoji, hit: false });
+  }
+}
 
-  const OUTFITS = {
-    sem: { label: 'Escolher', emoji: '👚' },
-    uniforme: { label: 'Uniforme', emoji: '🏫' },
-    blusarosa: { label: 'Blusa rosa', emoji: '👕' },
-    vestidocor: { label: 'Vestido', emoji: '👗' },
-    jaleco: { label: 'Jaleco', emoji: '🥼' },
-    cardiga: { label: 'Cardigã', emoji: '🧥' },
-    saiaplaid: { label: 'Saia xadrez', emoji: '🎒' },
-    moletom: { label: 'Moletom', emoji: '🧶' }
-  };
+function update() {
+  timeT++;
+  // jogador física
+  if (player.jumping) {
+    player.vy += 0.9;
+    player.y += player.vy;
+    if (player.y >= GROUND_Y) { player.y = GROUND_Y; player.jumping = false; player.vy = 0; dust(player.x, GROUND_Y + 30, 6); }
+  }
+  player.x += (LANES[player.lane] - player.x) * 0.25;
+  if (player.duckT > 0) { player.duckT--; if (player.duckT === 0) player.duck = 0; }
+  player.wobble += 0.15;
 
-  const GIRLS = [
-    'Alice', 'Lívia', 'Beatriz', 'Camila', 'Duda', 'Eduarda',
-    'Fernanda', 'Gabriela', 'Helena', 'Isabela', 'Júlia', 'Larissa',
-    'Manuela', 'Natália', 'Rafaela', 'Sofia', 'Valentina'
-  ].slice(0, 15);
+  // spawn
+  const cfg = levelConfig(level);
+  spawnT--;
+  if (spawnT <= 0) { spawnObstacle(); spawnT = cfg.spawn + Math.random() * 30; }
+  giftT--;
+  if (giftT <= 0) { gifts.push({ lane: (Math.random() * 3) | 0, y: -50 }); giftT = 300 + Math.random() * 300; }
 
-  // ============ ESTADO ============
-  const state = {};
-  GIRLS.forEach((name, i) => {
-    state[name] = {
-      base: 'nenhuma',
-      shadow: 'nenhuma',
-      lip: 'nenhuma',
-      outfit: 'sem',
-      hair: i === 0 ? 'liso' : 'liso'
-    };
+  // move objetos
+  for (const o of obstacles) o.y += speed;
+  for (const g of gifts) g.y += speed;
+  for (const c of coinsFly) { c.y -= 2; c.t--; }
+  coinsFly = coinsFly.filter(c => c.t > 0);
+  for (const p of particles) { p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.t--; }
+  particles = particles.filter(p => p.t > 0);
+  for (const cl of clouds) { cl.x += 0.3 * cl.s; if (cl.x > W + 60) cl.x = -60; }
+
+  // colisão
+  const px = player.x, py = player.y;
+  for (const o of obstacles) {
+    if (o.hit) continue;
+    const oy = o.y;
+    if (Math.abs(oy - py) < 46 && Math.abs(LANES[o.lane] - px) < 46) {
+      let safe = false;
+      if (o.type === 'low' && player.y < GROUND_Y - 55) safe = true;   // pulou!
+      if (o.type === 'high' && player.duck === 1) safe = true;         // abaixou!
+      if (!safe) { gameOver(o.emoji); return; }
+      else if (!o.counted) { o.counted = true; progress += 1; }
+    }
+    if (!o.counted && o.y > py + 50) { o.counted = true; progress += 1; }
+  }
+  obstacles = obstacles.filter(o => o.y < H + 80);
+
+  // presentes 🎁 = SALVAR!
+  for (const g of gifts) {
+    if (!g.hit && Math.abs(g.y - py) < 50 && Math.abs(LANES[g.lane] - px) < 50) {
+      g.hit = true;
+      S.boxes++;
+      save(S);
+      coinsFly.push({ x: px, y: py - 50, t: 60, txt: '🎁 SALVOU!' });
+      dust(px, py, 10);
+      showMsg('🎁 Jogo SALVO! 📦');
+      updateHUD();
+    }
+  }
+  gifts = gifts.filter(g => g.y < H + 60 && !g.hit);
+
+  if (msgT > 0) msgT--;
+
+  // passou de nível?
+  if (progress >= progressNeed) levelComplete();
+  updateHUD();
+}
+
+function dust(x, y, n) {
+  for (let i = 0; i < n; i++) particles.push({ x, y, vx: (Math.random() - .5) * 4, vy: -Math.random() * 3, t: 30 + Math.random() * 20 });
+}
+
+function showMsg(t) { msg = t; msgT = 90; }
+
+function gameOver(emoji) {
+  running = false;
+  dust(player.x, player.y, 20);
+  showOverlay('💥 Oh não! ' + emoji, 'Você bateu no nível ' + level + '!<br>Progresso: ' + Math.min(100, Math.round(progress / progressNeed * 100)) + '%<br><br>💡 Dica: 🦀 pule ⬆️ • 🪁 abaixe ⬇️ • 🌊 desvie ⬅️➡️<br>🎁 Pegue a caixa para salvar!', '🔄 Tentar de novo (Nível ' + level + ')', () => startLevel(level));
+}
+
+function levelComplete() {
+  running = false;
+  S.coins += 15;
+  if (!S.done.includes(level)) S.done.push(level);
+  if (level < 30) S.maxLevel = Math.max(S.maxLevel, level + 1);
+  save(S); updateHUD(); renderShop(); renderLevels();
+  coinsFly = [];
+  if (level >= 30) {
+    showOverlay('🏆 VOCÊ VENCEU! 🏆', 'Você completou os <b>30 níveis</b> da praia!<br>🪙 Moedas: <b>' + S.coins + '</b><br>📦 Caixas: <b>' + S.boxes + '</b><br>Você é o Defensor da Praia! 🌊💙', '🔁 Jogar de novo', () => startLevel(1));
+  } else {
+    showOverlay('🎉 Nível ' + level + ' completo!', '+15 moedas! 🪙 Total: <b>' + S.coins + '</b><br>🎁 Caixas que salvam: <b>' + S.boxes + '</b><br>Pronto para o nível ' + (level + 1) + '? Fica mais rápido! 😎', '➡️ Ir para Nível ' + (level + 1), () => startLevel(level + 1));
+  }
+}
+
+// ============ DESENHO PRAIA ============
+function draw() {
+  // céu
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#38bdf8'); sky.addColorStop(0.45, '#bae6fd'); sky.addColorStop(0.55, '#38bdf8'); sky.addColorStop(0.62, '#fde68a');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  // sol
+  ctx.fillStyle = '#fde047'; ctx.beginPath(); ctx.arc(W - 70, 70, 38, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(253,224,71,.35)'; ctx.beginPath(); ctx.arc(W - 70, 70, 55, 0, Math.PI * 2); ctx.fill();
+  // nuvens
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
+  for (const c of clouds) { ctx.beginPath(); ctx.ellipse(c.x, c.y, 34 * c.s, 14 * c.s, 0, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.ellipse(c.x + 22 * c.s, c.y + 4, 22 * c.s, 10 * c.s, 0, 0, Math.PI * 2); ctx.fill(); }
+  // mar
+  ctx.fillStyle = '#0284c7'; ctx.fillRect(0, 200, W, 90);
+  ctx.fillStyle = 'rgba(255,255,255,.5)';
+  const wv = Date.now() / 400;
+  for (let i = 0; i < 6; i++) {
+    const y = 215 + i * 13;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 8) ctx.lineTo(x, y + Math.sin(x / 40 + wv + i) * 4);
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  // areia
+  const sand = ctx.createLinearGradient(0, 290, 0, H);
+  sand.addColorStop(0, '#fde68a'); sand.addColorStop(1, '#f59e0b');
+  ctx.fillStyle = sand; ctx.fillRect(0, 290, W, H - 290);
+  // pistas
+  ctx.fillStyle = 'rgba(255,255,255,.35)';
+  LANES.forEach(x => { ctx.fillRect(x - 52, 295, 104, H - 295); });
+  ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3; ctx.setLineDash([12, 10]);
+  LANES.forEach(x => { ctx.beginPath(); ctx.moveTo(x - 52, 295); ctx.lineTo(x - 52, H); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x + 52, 295); ctx.lineTo(x + 52, H); ctx.stroke(); });
+  ctx.setLineDash([]);
+  // palmeiras laterais
+  ctx.font = '54px serif';
+  ctx.fillText('🌴', 2, 350); ctx.fillText('🌴', W - 58, 420);
+  ctx.font = '30px serif';
+  ctx.fillText('🐚', 20, 500 + Math.sin(wv) * 3); ctx.fillText('⭐', W - 45, 540);
+
+  // linha de chegada? mostra progresso
+  // presentes
+  ctx.font = '40px serif'; ctx.textAlign = 'center';
+  for (const g of gifts) {
+    ctx.fillText('🎁', LANES[g.lane], g.y);
+    ctx.font = '12px sans-serif'; ctx.fillStyle = '#92400e';
+    ctx.fillText('SALVA!', LANES[g.lane], g.y + 24);
+    ctx.font = '40px serif';
+  }
+  // obstáculos
+  for (const o of obstacles) {
+    const x = LANES[o.lane];
+    let size = 46;
+    if (o.type === 'full') size = 54;
+    // sombra + etiqueta do que fazer
+    ctx.fillStyle = 'rgba(0,0,0,.2)';
+    ctx.beginPath(); ctx.ellipse(x, o.y + 26, 26, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.font = size + 'px serif';
+    if (o.type === 'low') ctx.fillText(o.emoji, x, o.y);
+    else if (o.type === 'high') ctx.fillText(o.emoji, x, o.y - 20);
+    else ctx.fillText(o.emoji, x, o.y);
+    // dica
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = o.type === 'low' ? '#166534' : o.type === 'high' ? '#9a3412' : '#b91c1c';
+    const tip = o.type === 'low' ? '⬆️ PULE' : o.type === 'high' ? '⬇️ ABAIXE' : '⬅️ DESVIE ➡️';
+    ctx.fillText(tip, x, o.y + 42);
+  }
+  // jogador
+  const bounce = player.jumping ? 0 : Math.sin(player.wobble) * 3;
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  const shScale = player.y < GROUND_Y ? 0.6 : 1;
+  ctx.beginPath(); ctx.ellipse(player.x, GROUND_Y + 34, 28 * shScale, 9, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.font = (player.duck ? 38 : 56) + 'px serif';
+  ctx.fillText(charEmoji(), player.x, player.y + bounce + (player.duck ? 12 : 0));
+  if (player.duck) { ctx.font = '18px sans-serif'; ctx.fillStyle = '#0c4a6e'; ctx.fillText('⬇️', player.x, player.y - 30); }
+
+  // moedas voando
+  ctx.font = 'bold 20px sans-serif'; ctx.fillStyle = '#92400e';
+  for (const c of coinsFly) ctx.fillText(c.txt, c.x, c.y);
+  // partículas
+  for (const p of particles) { ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(p.x, p.y, 4, 4); }
+  // msg
+  if (msgT > 0) {
+    ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#0369a1'; ctx.lineWidth = 5;
+    ctx.strokeText(msg, W / 2, 340); ctx.fillText(msg, W / 2, 340);
+  }
+  // nível no topo do canvas
+  ctx.font = 'bold 18px sans-serif'; ctx.fillStyle = '#0c4a6e'; ctx.textAlign = 'left';
+  ctx.fillText('🏝️ Nível ' + level, 12, 28);
+  ctx.textAlign = 'right'; ctx.fillText('🎯 ' + Math.min(progress, progressNeed) + '/' + progressNeed, W - 12, 28);
+  ctx.textAlign = 'center';
+}
+
+function loop() {
+  if (!running) return;
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ============ CONTROLES ============
+function doLeft() { if (running && player.lane > 0) player.lane--; }
+function doRight() { if (running && player.lane < 2) player.lane++; }
+function doJump() {
+  if (!running) return;
+  if (!player.jumping) { player.jumping = true; player.vy = -15; player.duck = 0; player.duckT = 0; }
+}
+function doDuck() {
+  if (!running) return;
+  if (player.jumping) { player.vy = 12; } // desce rápido
+  player.duck = 1; player.duckT = 40;
+}
+document.addEventListener('keydown', (e) => {
+  if (['ArrowLeft', 'a', 'A'].includes(e.key)) { doLeft(); e.preventDefault(); }
+  else if (['ArrowRight', 'd', 'D'].includes(e.key)) { doRight(); e.preventDefault(); }
+  else if (['ArrowUp', 'w', 'W', ' '].includes(e.key)) { doJump(); e.preventDefault(); }
+  else if (['ArrowDown', 's', 'S'].includes(e.key)) { doDuck(); e.preventDefault(); }
+});
+document.getElementById('btnLeft').onclick = doLeft;
+document.getElementById('btnRight').onclick = doRight;
+document.getElementById('btnJump').onclick = doJump;
+document.getElementById('btnDuck').onclick = doDuck;
+// swipe
+let tx = 0, ty = 0;
+canvas.addEventListener('touchstart', (e) => { const t = e.touches[0]; tx = t.clientX; ty = t.clientY; }, { passive: true });
+canvas.addEventListener('touchend', (e) => {
+  const t = e.changedTouches[0];
+  const dx = t.clientX - tx, dy = t.clientY - ty;
+  if (Math.abs(dx) < 15 && Math.abs(dy) < 15) { doJump(); return; }
+  if (Math.abs(dx) > Math.abs(dy)) { dx > 0 ? doRight() : doLeft(); }
+  else { dy < 0 ? doJump() : doDuck(); }
+}, { passive: true });
+
+// ============ UI ============
+const $ = (id) => document.getElementById(id);
+function updateHUD() {
+  $('hudLevel').textContent = level;
+  $('hudCoins').textContent = S.coins;
+  $('hudBox').textContent = S.boxes;
+  $('hudLives').textContent = running ? '1' : '—';
+  $('shopCoins').textContent = S.coins;
+  const pct = Math.min(100, Math.round(progress / progressNeed * 100));
+  $('levelFill').style.width = pct + '%';
+  $('levelText').textContent = pct + '%';
+}
+function showOverlay(title, html, btnLabel, onPlay) {
+  $('overlay').classList.remove('hidden');
+  $('ovTitle').innerHTML = title;
+  $('ovText').innerHTML = html;
+  const b = $('playBtn');
+  b.textContent = btnLabel;
+  b.onclick = onPlay;
+}
+function hideOverlay() { $('overlay').classList.add('hidden'); }
+function startLevel(lv) {
+  level = Math.min(Math.max(lv, 1), 30);
+  resetLevel(level);
+  hideOverlay(); closeAll();
+  running = true;
+  updateHUD();
+  requestAnimationFrame(loop);
+  showMsg('🏝️ Nível ' + level + '!');
+}
+
+function renderShop() {
+  const g = $('shopGrid'); g.innerHTML = '';
+  CHARS.forEach(c => {
+    const owned = S.owned.includes(c.id);
+    const sel = S.selected === c.id;
+    const d = document.createElement('div');
+    d.className = 'shop-item' + (sel ? ' selected' : '');
+    d.innerHTML = '<div class="emo">' + c.emoji + '</div><div class="nm">' + c.name + '</div><div class="pr">' + (c.price === 0 ? 'GRÁTIS 💙' : '🪙 ' + c.price) + '</div>';
+    const b = document.createElement('button');
+    if (!owned) { b.textContent = 'Comprar 🪙' + c.price; b.onclick = () => {
+      if (S.coins >= c.price) { S.coins -= c.price; S.owned.push(c.id); S.selected = c.id; save(S); updateHUD(); renderShop(); }
+      else alert('Você precisa de ' + c.price + ' moedas! Jogue níveis para ganhar 15 moedas cada. 🪙');
+    }; }
+    else if (!sel) { b.textContent = 'Usar ✅'; b.className = 'owned'; b.onclick = () => { S.selected = c.id; save(S); renderShop(); }; }
+    else { b.textContent = 'Usando 💙'; b.className = 'owned'; }
+    d.appendChild(b);
+    g.appendChild(d);
   });
-
-  // ============ DOM ============
-  const $ = (id) => document.getElementById(id);
-  const grid = $('grid');
-
-  // ============ PALETA DE CORES ============
-  const PALETTE = [
-    ['#ffb3d9', '#e6b3ff', '#f9a8d4', '#c4b5fd'],
-    ['#fbcfe8', '#ddd6fe', '#f9d5e5', '#d8b4fe'],
-    ['#f9c5d8', '#e9d5ff', '#ffc1e3', '#cfb5ff'],
-    ['#ffd1e8', '#dec4ff', '#f3b8d4', '#c9a8ff'],
-    ['#fec7e0', '#e2c4ff', '#fbafd6', '#c2a0ff']
-  ];
-
-  const AVATAR_COLORS = {
-    Alice: '#ffb3d9', 'Lívia': '#c4b5fd', Beatriz: '#f9a8d4', Camila: '#ddd6fe',
-    Duda: '#f9c5d8', Eduarda: '#e9d5ff', Fernanda: '#ffd1e8', Gabriela: '#dec4ff',
-    Helena: '#fbcfe8', Isabela: '#d8b4fe', 'Júlia': '#fec7e0', Larissa: '#cfb5ff',
-    Manuela: '#f3b8d4', 'Natália': '#c2a0ff', Rafaela: '#ffc1e3'
-  };
-
-  function skinColor(base) {
-    return BASES[base] ? (BASES[base].tone || '#ffe4c4') : '#ffe4c4';
+  $('shopCoins').textContent = S.coins;
+}
+function renderLevels() {
+  const g = $('levelsGrid'); g.innerHTML = '';
+  for (let i = 1; i <= 30; i++) {
+    const b = document.createElement('button');
+    b.textContent = i;
+    if (S.done.includes(i)) b.className = 'done';
+    if (i > S.maxLevel) { b.classList.add('locked'); b.textContent = '🔒'; }
+    else b.onclick = () => startLevel(i);
+    g.appendChild(b);
   }
+}
+function closeAll() { $('shop').classList.add('hidden'); $('levelsModal').classList.add('hidden'); $('helpModal').classList.add('hidden'); }
 
-  function hairColorFor(name) {
-    const base = Math.floor(Math.random() * 3);
-    return ['#8b5a2b', '#2f1b0e', '#d9a066'][base];
-  }
+$('shopBtn').onclick = () => { renderShop(); closeAll(); $('shop').classList.remove('hidden'); };
+$('closeShop').onclick = () => $('shop').classList.add('hidden');
+$('levelsBtn').onclick = () => { renderLevels(); closeAll(); $('levelsModal').classList.remove('hidden'); };
+$('closeLevels').onclick = () => $('levelsModal').classList.add('hidden');
+$('helpBtn').onclick = () => { closeAll(); $('helpModal').classList.remove('hidden'); };
+$('closeHelp').onclick = () => $('helpModal').classList.add('hidden');
+$('startBtn').onclick = () => startLevel(Math.min(S.maxLevel, 30));
 
-  // ============ DESENHO DO AVATAR ============
-  function drawGirl(canvas, name, opts) {
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const skin = skinColor(opts.base);
-    const cx = w / 2;
-
-    // cabelo (fundo)
-    drawHairStyle(ctx, cx, opts.hair, opts, name);
-
-    // cabeça / face
-    ctx.fillStyle = skin;
-    ctx.beginPath();
-    ctx.ellipse(cx, 120, 62, 72, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // bochechas rosadas
-    ctx.fillStyle = 'rgba(244,114,182,0.35)';
-    ctx.beginPath(); ctx.ellipse(cx - 34, 138, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx + 34, 138, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
-
-    // olhos
-    const eyeY = 118;
-    [cx - 22, cx + 22].forEach((x) => {
-      ctx.fillStyle = '#2b1b3d';
-      ctx.beginPath(); ctx.ellipse(x, eyeY, 7, 9, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'white';
-      ctx.beginPath(); ctx.arc(x - 2, eyeY - 3, 2.5, 0, Math.PI * 2); ctx.fill();
-    });
-
-    // sombra
-    if (opts.shadow && opts.shadow !== 'nenhuma') {
-      const tone = SHADOWS[opts.shadow].tone || '#8b5cf6';
-      if (opts.shadow === 'degradê') {
-        const grad = ctx.createLinearGradient(cx - 30, 100, cx + 30, 120);
-        grad.addColorStop(0, '#f9a8d4');
-        grad.addColorStop(1, '#8b5cf6');
-        ctx.fillStyle = grad;
-      } else {
-        ctx.fillStyle = tone;
-        ctx.globalAlpha = 0.55;
-      }
-      [cx - 28, cx + 6].forEach((x) => {
-        ctx.beginPath(); ctx.ellipse(x, 106, 16, 10, 0, 0, Math.PI * 2); ctx.fill();
-      });
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = '#8b5cf6';
-      [cx - 28, cx + 6].forEach((x) => {
-        ctx.beginPath(); ctx.ellipse(x, 106, 16, 10, 0, 0, Math.PI * 2); ctx.fill();
-      });
-      ctx.globalAlpha = 1;
-    }
-
-    // cílios
-    ctx.strokeStyle = '#2b1b3d'; ctx.lineWidth = 2;
-    [cx - 22, cx + 22].forEach((x) => {
-      ctx.beginPath(); ctx.moveTo(x - 6, eyeY - 7); ctx.lineTo(x - 10, eyeY - 10); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(x + 6, eyeY - 7); ctx.lineTo(x + 10, eyeY - 10); ctx.stroke();
-    });
-
-    // nariz
-    ctx.strokeStyle = 'rgba(180,120,80,0.4)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(cx, 128, 4, 0.15, Math.PI - 0.15); ctx.stroke();
-
-    // boca
-    drawLips(ctx, cx, opts.lip);
-
-    // pescoço
-    ctx.fillStyle = skin;
-    ctx.fillRect(cx - 10, 185, 20, 22);
-
-    // olhos grandes no cabelo pra fronte
-
-    // corpo / roupa
-    drawOutfit(ctx, cx, opts.outfit, opts);
-
-    drawHairFront(ctx, cx, opts.hair, opts, name);
-  }
-
-  function drawLips(ctx, cx, lip) {
-    const tone = LIPS[lip] ? LIPS[lip].tone : null;
-    ctx.fillStyle = tone || '#e4929d';
-    ctx.beginPath();
-    ctx.moveTo(cx - 12, 150);
-    ctx.quadraticCurveTo(cx, 142, cx + 12, 150);
-    ctx.quadraticCurveTo(cx, 162, cx - 12, 150);
-    ctx.fill();
-    if (lip === 'gloss') {
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.beginPath(); ctx.arc(cx - 4, 148, 3, 0, Math.PI * 2); ctx.fill();
-    }
-  }
-
-  function drawOutfit(ctx, cx, outfit) {
-    const topY = 205;
-    const bodyColor = '#ffe4c4';
-    const shirt = OUTFITS[outfit];
-    let color = '#f9a8d4';
-
-    switch (outfit) {
-      case 'uniforme': color = '#8b5cf6'; break;
-      case 'blusarosa': color = '#ec4899'; break;
-      case 'vestidocor': color = '#a78bfa'; break;
-      case 'jaleco': color = '#f0f4ff'; break;
-      case 'cardiga': color = '#c084fc'; break;
-      case 'saiaplaid': color = '#d946ef'; break;
-      case 'moletom': color = '#a855f7'; break;
-      default: color = 'transparent';
-    }
-
-    if (outfit === 'sem') {
-      // regata simples
-      ctx.fillStyle = '#f9a8d4';
-      ctx.fillRect(cx - 30, topY, 60, 60);
-      ctx.fillRect(cx - 42, topY - 8, 16, 30);
-      ctx.fillRect(cx + 26, topY - 8, 16, 30);
-      return;
-    }
-
-    // blusa / corpo central
-    ctx.fillStyle = color;
-    ctx.fillRect(cx - 32, topY, 64, 55);
-    // mangas
-    ctx.fillRect(cx - 46, topY - 10, 20, 30);
-    ctx.fillRect(cx + 26, topY - 10, 20, 30);
-    // decote
-    ctx.fillStyle = bodyColor;
-    ctx.beginPath();
-    ctx.moveTo(cx - 14, topY);
-    ctx.quadraticCurveTo(cx, topY + 16, cx + 14, topY);
-    ctx.lineTo(cx - 14, topY);
-    ctx.fill();
-
-    if (outfit === 'uniforme') {
-      // gravata
-      ctx.fillStyle = '#ec4899';
-      ctx.beginPath();
-      ctx.moveTo(cx - 3, topY + 12);
-      ctx.lineTo(cx + 3, topY + 12);
-      ctx.lineTo(cx + 5, topY + 28);
-      ctx.lineTo(cx, topY + 34);
-      ctx.lineTo(cx - 5, topY + 28);
-      ctx.closePath();
-      ctx.fill();
-    }
-    if (outfit === 'jaqueta' || outfit === 'cardiga') {
-      // botões
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(cx, topY + 16 + i * 10, 2, 0, Math.PI * 2); ctx.fill(); }
-    }
-    if (outfit === 'moletom') {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(cx, topY - 14); ctx.lineTo(cx, topY + 30); ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx, topY - 14, 6, 0, Math.PI * 2); ctx.stroke();
-    }
-    if (outfit === 'saiaplaid') {
-      ctx.fillStyle = '#ec4899';
-      ctx.beginPath();
-      ctx.moveTo(cx - 34, topY + 52);
-      ctx.lineTo(cx + 34, topY + 52);
-      ctx.lineTo(cx + 22, topY + 95);
-      ctx.lineTo(cx - 22, topY + 95);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#8b5cf6';
-      ctx.fillRect(cx - 34, topY + 52, 9, 43);
-      ctx.fillRect(cx - 9, topY + 52, 9, 43);
-    }
-  }
-
-  function drawHairStyle(ctx, cx, style, opts, name) {
-    const hairColor = opts.hairColor || hairColorFor(name);
-    const skin = skinColor(opts.base);
-    let w = 130, h = 150;
-
-    ctx.fillStyle = hairColor;
-    if (style === 'liso') {
-      ctx.beginPath();
-      ctx.ellipse(cx, 110, 68, 80, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillRect(cx - 68, 100, 20, 120);
-      ctx.fillRect(cx + 48, 100, 20, 120);
-    } else if (style === 'crespo') {
-      for (let a = 0; a < 2 * Math.PI; a += 0.09) {
-        const bx = cx + Math.cos(a) * 40;
-        const by = 110 + Math.sin(a) * 46;
-        ctx.beginPath(); ctx.arc(bx, by - 12, 20, 0, Math.PI * 2); ctx.fill();
-      }
-      for (let i = 0; i < 8; i++) {
-        ctx.beginPath(); ctx.arc(cx - 65 + i * 18, 118, 22, 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (style === 'ondulado') {
-      ctx.beginPath(); ctx.ellipse(cx, 110, 66, 78, 0, 0, Math.PI * 2); ctx.fill();
-      for (let i = 0; i < 6; i++) {
-        const y = 120 + i * 24;
-        ctx.beginPath(); ctx.arc(cx - 58, y, 16, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(cx + 58, y, 16, 0, Math.PI * 2); ctx.fill();
-      }
-    } else if (style === 'coque') {
-      ctx.beginPath(); ctx.arc(cx, 70, 26, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(cx, 100, 60, 58, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ec4899';
-      ctx.beginPath(); ctx.arc(cx, 66, 6, 0, Math.PI * 2); ctx.fill();
-    } else if (style === 'trança') {
-      ctx.beginPath(); ctx.ellipse(cx, 105, 60, 70, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = hairColor; ctx.lineWidth = 12;
-      ctx.beginPath(); ctx.moveTo(cx + 48, 130); ctx.quadraticCurveTo(cx + 62, 210, cx + 44, 240); ctx.stroke();
-    } else if (style === 'rabo') {
-      ctx.beginPath(); ctx.ellipse(cx, 105, 62, 70, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = hairColor; ctx.lineWidth = 16;
-      ctx.beginPath(); ctx.moveTo(cx - 40, 130); ctx.quadraticCurveTo(cx - 60, 180, cx - 44, 220); ctx.stroke();
-      ctx.fillStyle = '#ec4899';
-      ctx.beginPath(); ctx.arc(cx - 40, 118, 7, 0, Math.PI * 2); ctx.fill();
-    }
-  }
-
-  function drawHairFront(ctx, cx, style, opts, name) {
-    const hairColor = opts.hairColor || hairColorFor(name);
-    ctx.fillStyle = hairColor;
-    // franja
-    ctx.beginPath(); ctx.arc(cx, 98, 40, Math.PI, 2 * Math.PI); ctx.fill();
-    // topo
-    ctx.beginPath(); ctx.arc(cx, 78, 46, 0, Math.PI); ctx.fill();
-  }
-
-  // ============ SIMPLES DESENHO DO ZONE PHOTO ============
-  function drawZone(id, name, opts) {
-    const el = document.querySelector(id);
-    if (!el) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = 42; canvas.height = 42;
-    drawGirl(canvas, name, opts);
-    el.appendChild(canvas);
-    canvas.style.borderRadius = '50%';
-  }
-
-  // ============ AVATAR SVG SIMPLES ============
-  function avatarSvg(name, opts) {
-    const skin = skinColor(opts.base);
-    const hair = opts.hairColor || AVATAR_COLORS[name] || '#8b5a2b';
-    return `<svg viewBox="0 0 80 80">
-      <circle cx="40" cy="40" r="38" fill="${AVATAR_COLORS[name] || '#f9a8d4'}"/>
-      <circle cx="40" cy="34" r="26" fill="${skin}"/>
-      <ellipse cx="40" cy="30" rx="28" ry="14" fill="${hair}"/>
-      <circle cx="32" cy="36" r="2.5" fill="#2b1b3d"/>
-      <circle cx="48" cy="36" r="2.5" fill="#2b1b3d"/>
-      <path d="M32 48 Q40 55 48 48" stroke="${LIPS[opts.lip].tone || '#e4929d'}" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <rect x="18" y="52" width="44" height="22" rx="6" fill="${outfitColor(opts.outfit)}"/>
-    </svg>`;
-  }
-
-  function outfitColor(outfit) {
-    return {
-      uniforme: '#8b5cf6', blusarosa: '#ec4899', vestidocor: '#a78bfa',
-      jaleco: '#e0e7ff', cardiga: '#c084fc', saiaplaid: '#d946ef',
-      moletom: '#a855f7'
-    }[outfit] || '#f9a8d4';
-  }
-
-  // ============ CAPTURAR CANVAS PARA CARD ============
-  function updateCard(card, name) {
-    const opts = state[name];
-    const img = card.querySelector('.avatar');
-    img.innerHTML = avatarSvg(name, opts);
-    const outfitDesc = card.querySelector('.outfit-desc');
-    outfitDesc.textContent = OUTFITS[opts.outfit].emoji + ' ' + OUTFITS[opts.outfit].label;
-    card.classList.toggle('ready', opts.outfit !== 'sem' && opts.shadow !== 'nenhuma' && opts.lip !== 'nenhuma');
-  }
-
-  // ============ GERAR TOOLS ============
-  function makeOptions(containerId, data, girl, key) {
-    const container = $(containerId);
-    container.innerHTML = '';
-    Object.keys(data).forEach((val) => {
-      const b = document.createElement('button');
-      b.className = 'option';
-      b.dataset.val = val;
-      b.innerHTML = `<span class="emoji">${data[val].emoji}</span>${data[val].label}`;
-      b.addEventListener('click', () => {
-        state[girl][key] = val;
-        refreshOptions(containerId, state[girl][key]);
-        applyTools(girl);
-      });
-      container.appendChild(b);
-    });
-    refreshOptions(containerId, state[girl][key]);
-  }
-
-  function makeHairOptions(containerId, name) {
-    const container = $(containerId);
-    container.innerHTML = '';
-    Object.keys(HAIR_STYLES).forEach((val) => {
-      const b = document.createElement('button');
-      b.className = 'option';
-      b.dataset.val = val;
-      b.innerHTML = `<span class="emoji">${HAIR_STYLES[val].emoji}</span>${HAIR_STYLES[val].label}`;
-      b.addEventListener('click', () => {
-        state[name].hair = val;
-        refreshOptions(containerId, state[name].hair);
-        applyHair(name);
-      });
-      container.appendChild(b);
-    });
-    refreshOptions(containerId, state[name].hair);
-  }
-
-  function refreshOptions(containerId, selected) {
-    const container = $(containerId);
-    container.querySelectorAll('.option').forEach((b) => {
-      b.classList.toggle('active', b.dataset.val === selected);
-    });
-  }
-
-  // ============ APLICAR ============
-  // desenha os zone photos das duas meninas
-  function drawZones() {
-    drawZone('#alice .zone-photo-alice', 'Alice', state.Alice);
-    drawZone('#livia .zone-photo-livia', 'Lívia', state['Lívia']);
-  }
-
-  function applyHair(name) {
-    if (name === 'Alice') drawCanvasHair('aliceCanv', name);
-    if (name === 'Lívia') drawCanvasHair('liviaCanv', name);
-  }
-
-  function drawCanvasHair(canvasId, name) {
-    const canvas = document.getElementById(canvasId);
-    if (canvas) {
-      const opts = Object.assign({}, state[name], { base: 'natural', shadow: 'nenhuma', lip: 'nenhuma', outfit: 'uniforme' });
-      drawGirl(canvas, name, opts);
-    }
-  }
-
-  // decora o estado com cor de cabelo
-  function assignHairColors() {
-    GIRLS.forEach((name) => {
-      if (!state[name].hairColor) state[name].hairColor = hairColorFor(name);
-    });
-  }
-
-  // ============ PROGRESSO ============
-  function countReady() {
-    return GIRLS.filter((n) => state[n].outfit !== 'sem' && state[n].shadow !== 'nenhuma' && state[n].lip !== 'nenhuma').length;
-  }
-
-  function updateProgress() {
-    const done = countReady();
-    $('progressText').textContent = `${done}/${GIRLS.length}`;
-    $('progressFill').style.width = (done / GIRLS.length * 100) + '%';
-    if (done === GIRLS.length) celebrate();
-  }
-
-  function celebrate() {
-    const el = $('celebrate');
-    el.innerHTML = `<div class="celebrate-card">
-      <h2>🎉 Parabéns! 🎉</h2>
-      <p>Todas as ${GIRLS.length} meninas estão lindas e prontas para a escola! 🏫💖</p>
-      <button id="closeCelebrate" class="btn">Continuar 📚</button>
-    </div>`;
-    el.classList.remove('hidden');
-    $('closeCelebrate').addEventListener('click', () => el.classList.add('hidden'));
-  }
-
-  function drawOK() {
-    updateProgress();
-    drawZones();
-  }
-
-  // ============ RANDOM / RESET ============
-  function randomize() {
-    const lipKeys = Object.keys(LIPS).filter((k) => k !== 'nenhuma');
-    const shadowKeys = Object.keys(SHADOWS).filter((k) => k !== 'nenhuma' && k !== 'degradê');
-    const shadowAll = Object.keys(SHADOWS).filter((k) => k !== 'nenhuma');
-    const outfitKeys = Object.keys(OUTFITS).filter((k) => k !== 'sem');
-    GIRLS.forEach((name) => {
-      state[name].lip = lipKeys[Math.floor(Math.random() * lipKeys.length)];
-      state[name].shadow = shadowAll[Math.floor(Math.random() * shadowAll.length)];
-      state[name].outfit = outfitKeys[Math.floor(Math.random() * outfitKeys.length)];
-      state[name].base = ['natural', 'porcelana', 'rosa', 'roxa'][Math.floor(Math.random() * 4)];
-    });
-    refreshOptions('lipTools', state.Alice.lip);
-    refreshOptions('shadowTools', state.Alice.shadow);
-    refreshOptions('outfitTools', state.Alice.outfit);
-    refreshOptions('baseTools', state.Alice.base);
-    grid.innerHTML = '';
-    renderGrid();
-  }
-
-  function resetAll() {
-    GIRLS.forEach((name) => {
-      state[name].base = 'nenhuma';
-      state[name].shadow = 'nenhuma';
-      state[name].lip = 'nenhuma';
-      state[name].outfit = 'sem';
-    });
-    refreshOptions('lipTools', 'nenhuma');
-    refreshOptions('shadowTools', 'nenhuma');
-    refreshOptions('outfitTools', 'sem');
-    refreshOptions('baseTools', 'nenhuma');
-    grid.innerHTML = '';
-    renderGrid();
-  }
-
-  // ============ RENDER GRID ============
-  function renderGrid() {
-    grid.innerHTML = '';
-    GIRLS.forEach((name) => {
-      const card = document.createElement('div');
-      card.className = 'girl-card';
-      card.innerHTML = `
-        <div class="avatar"></div>
-        <div class="name">${name}</div>
-        <div class="outfit-desc"></div>
-        <span class="badge">✅ pronta</span>
-      `;
-      // zona de maquiagem: clique no card abre a ferramenta
-      card.addEventListener('click', () => {
-        const baseOpts = ['natural', 'porcelana', 'rosa', 'roxa'];
-        state[name].base = baseOpts[Math.floor(Math.random() * baseOpts.length)];
-        updateCard(card, name);
-      });
-      grid.appendChild(card);
-      updateCard(card, name);
-    });
-  }
-
-  // ============ INIT ============
-  function init() {
-    assignHairColors();
-
-    // tools de maquiagem - aplicam a todas as meninas do grid
-    makeOptions('baseTools', BASES, 'Alice', 'base');
-    makeOptions('shadowTools', SHADOWS, 'Alice', 'shadow');
-    makeOptions('lipTools', LIPS, 'Alice', 'lip');
-    makeOptions('outfitTools', OUTFITS, 'Alice', 'outfit');
-
-    // reconfigura os listeners de maquiagem para aplicar a TODAS as meninas
-    ['baseTools', 'shadowTools', 'lipTools', 'outfitTools'].forEach((id) => {
-      const container = $(id);
-      container.querySelectorAll('.option').forEach((b) => {
-        b.removeEventListener('click', null);
-        const key = { baseTools: 'base', shadowTools: 'shadow', lipTools: 'lip', outfitTools: 'outfit' }[id];
-        b.addEventListener('click', () => {
-          GIRLS.forEach((name) => { state[name][key] = b.dataset.val; });
-          refreshOptions(id, b.dataset.val);
-          renderGrid();
-        });
-      });
-    });
-
-    // hair
-    makeHairOptions('aliceHair', 'Alice');
-    makeHairOptions('liviaHair', 'Lívia');
-
-    // desenha os cabelos
-    drawCanvasHair('aliceCanv', 'Alice');
-    drawCanvasHair('liviaCanv', 'Lívia');
-
-    // grid
-    renderGrid();
-    drawZones();
-
-    // random/reset
-    $('randomBtn').addEventListener('click', randomize);
-    $('resetBtn').addEventListener('click', resetAll);
-
-    updateProgress();
-  }
-
-  init();
+// init
+resetLevel(Math.min(S.maxLevel, 30));
+level = Math.min(S.maxLevel, 30);
+draw();
+updateHUD(); renderShop(); renderLevels();
+showOverlay('🌊 Stitch Defensor da Praia! 🏖️',
+  'Desvie na praia!<br>⬅️➡️ trocar de pista • ⬆️ pular 🦀 • ⬇️ abaixar 🪁<br><br>🏆 30 níveis • +15 🪙 por nível<br>🛍️ Compre: Vaca 🐄 Macaco 🐵 Cachorro 🐶 Sapo 🐸 Pato 🦆 (10 🪙)<br>🎁 Pegue a <b>CAIXA</b> para <b>SALVAR</b>!',
+  '▶️ Começar Nível ' + level, () => startLevel(level));
 })();

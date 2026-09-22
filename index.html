@@ -2,98 +2,90 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Maquiagem da Escola 💄✨</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>🌊 Stitch Defensor da Praia 🏖️</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="game">
     <header class="header">
-      <h1>💄 Maquiagem da Escola ✨</h1>
-      <p class="subtitle">Maquie as meninas, escolha a roupa e arrume o cabelo para ir à escola!</p>
-      <div class="progress">
-        <span id="progressText">0/15</span> meninas prontas
-        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+      <h1>🌊 Stitch Defensor da Praia 🏖️</h1>
+      <p class="subtitle">Pule 🦘 • Abaixe ⬇️ • Desvie ⬅️➡️ • 30 níveis na praia!</p>
+      <div class="hud">
+        <div class="hud-item">🏝️ Nível <b id="hudLevel">1</b>/30</div>
+        <div class="hud-item">🪙 <b id="hudCoins">0</b> moedas</div>
+        <div class="hud-item">❤️ <b id="hudLives">1</b></div>
+        <div class="hud-item">📦 <b id="hudBox">0</b></div>
+      </div>
+      <div class="hud-bar">
+        <div class="level-progress"><div id="levelFill"></div></div>
+        <span id="levelText">0%</span>
+      </div>
+      <div class="top-btns">
+        <button id="shopBtn" class="btn btn-small">🛍️ Loja</button>
+        <button id="levelsBtn" class="btn btn-small">🏝️ Níveis</button>
+        <button id="helpBtn" class="btn btn-small">❓ Ajuda</button>
+        <button id="startBtn" class="btn">▶️ Jogar</button>
       </div>
     </header>
 
-    <main class="main">
-      <div class="girl-zones">
-        <a href="#alice" class="zone-card alice-card">
-          <div class="zone-photo-alice"></div>
-          <span>Alice</span>
-        </a>
-        <a href="#livia" class="zone-card livia-card">
-          <div class="zone-photo-livia"></div>
-          <span>Lívia</span>
-        </a>
+    <main class="stage-wrap">
+      <canvas id="game" width="480" height="600"></canvas>
+
+      <div id="overlay" class="overlay">
+        <div class="card">
+          <h2 id="ovTitle">🌊 Stitch na Praia!</h2>
+          <p id="ovText">Desvie dos obstáculos da praia!<br>⬅️➡️ trocar de pista • ⬆️ pular • ⬇️ abaixar<br><br>🎁 Pegue a <b>caixa</b> no caminho para <b>salvar</b> seu jogo!</p>
+          <button id="playBtn" class="btn">▶️ Começar Nível 1</button>
+        </div>
       </div>
 
-      <section id="alice" class="girl-section">
-        <h2>💇 Arrumar o Cabelo — Alice</h2>
-        <div class="hair-layout">
-          <div class="mannequin">
-            <canvas id="aliceCanv" width="260" height="340"></canvas>
-            <div class="mannequin-name">Alice</div>
-          </div>
-          <div class="hair-tools">
-            <h3>Estilos de Cabelo</h3>
-            <div id="aliceHair" class="option-grid"></div>
-          </div>
+      <div id="shop" class="overlay hidden">
+        <div class="card shop-card">
+          <h2>🛍️ Loja — 🪙 <span id="shopCoins">0</span></h2>
+          <p>Ganhe <b>15 moedas</b> a cada nível! Stitch é grátis.</p>
+          <div id="shopGrid" class="shop-grid"></div>
+          <button id="closeShop" class="btn">Fechar</button>
         </div>
-      </section>
+      </div>
 
-      <section id="livia" class="girl-section">
-        <h2>💇 Arrumar o Cabelo — Lívia</h2>
-        <div class="hair-layout">
-          <div class="mannequin">
-            <canvas id="liviaCanv" width="260" height="340"></canvas>
-            <div class="mannequin-name">Lívia</div>
-          </div>
-          <div class="hair-tools">
-            <h3>Estilos de Cabelo</h3>
-            <div id="liviaHair" class="option-grid"></div>
-          </div>
+      <div id="levelsModal" class="overlay hidden">
+        <div class="card">
+          <h2>🏝️ 30 Níveis</h2>
+          <p>Complete para ganhar 15 moedas!</p>
+          <div id="levelsGrid" class="levels-grid"></div>
+          <button id="closeLevels" class="btn">Fechar</button>
         </div>
-      </section>
+      </div>
 
-      <section class="girl-section">
-        <h2>💄 Maquiagem & 👗 Roupas para a Escola</h2>
-        <div class="tools">
-          <div class="tool-group">
-            <h3>Base</h3>
-            <div id="baseTools" class="option-grid"></div>
-          </div>
-          <div class="tool-group">
-            <h3>Sombras 🎨</h3>
-            <div id="shadowTools" class="option-grid"></div>
-          </div>
-          <div class="tool-group">
-            <h3>Batom 💋</h3>
-            <div id="lipTools" class="option-grid"></div>
-          </div>
-          <div class="tool-group">
-            <h3>Roupa para a Escola 🎒</h3>
-            <div id="outfitTools" class="option-grid"></div>
-          </div>
+      <div id="helpModal" class="overlay hidden">
+        <div class="card">
+          <h2>❓ Como jogar</h2>
+          <p class="help-text">
+            🏖️ <b>Tema praia!</b><br><br>
+            🦀 <b>Baixo</b> (caranguejo, pedra) → <b>PULE</b> ⬆️<br>
+            🪁 <b>Alto</b> (pipa, guarda-sol) → <b>ABAIXE</b> ⬇️<br>
+            🌊 <b>Grande</b> (onda, baleia) → <b>DESVIE</b> ⬅️➡️<br><br>
+            🎁 <b>Caixa</b> = SALVA seu jogo!<br>
+            🏆 Cada nível = <b>+15 moedas</b><br><br>
+            ⌨️ Setas / WASD / Espaço<br>
+            📱 Botões na tela ou arraste o dedo
+          </p>
+          <button id="closeHelp" class="btn">Entendi!</button>
         </div>
+      </div>
 
-        <div class="randomize">
-          <button id="randomBtn" class="btn">🎲 Surpreenda-me</button>
-          <button id="resetBtn" class="btn btn-reset">🔄 Limpar</button>
-        </div>
-      </section>
+      <div class="controls">
+        <button id="btnLeft" class="ctl">⬅️</button>
+        <button id="btnJump" class="ctl">⬆️🐾</button>
+        <button id="btnDuck" class="ctl">⬇️</button>
+        <button id="btnRight" class="ctl">➡️</button>
+      </div>
+      <p class="hint">⬅️➡️ desviar • ⬆️ / Espaço pular • ⬇️ abaixar • Pegue 🎁 para salvar!</p>
     </main>
 
-    <div class="grid" id="grid"></div>
-
-    <footer class="footer">
-      <p>Maquie as 15 meninas para levá-las à escola! 🏫</p>
-    </footer>
+    <footer class="footer">Feito com 💙 • Stitch Defensor da Praia • 30 níveis</footer>
   </div>
-
-  <div id="celebrate" class="celebrate hidden"></div>
-
   <script src="script.js"></script>
 </body>
 </html>
